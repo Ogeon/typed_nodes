@@ -1,0 +1,2 @@
+[workspace]
+members = ["typed_nodes", "typed_nodes_macros"]

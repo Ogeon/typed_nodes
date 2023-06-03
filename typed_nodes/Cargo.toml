@@ -1,0 +1,17 @@
+[package]
+name = "typed_nodes"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["lua54", "vendored"]
+lua54 = ["mlua/lua54"]
+vendored = ["mlua/vendored"]
+
+[dependencies]
+typed_nodes_macros = { path = "../typed_nodes_macros" }
+slotmap = "1.0.6"
+ahash = "0.8.3"
+mlua = "0.8.8"
+downcast-rs = "1.2.0"
+smallbox = "0.8.1"
