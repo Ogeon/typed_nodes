@@ -1,9 +1,9 @@
 [package]
 name = "typed_nodes_macros"
 version = "0.1.0"
-edition = "2021"
 authors = ["Erik Hedvall <hello@erikhedvall.nu>"]
 license = "MIT OR Apache-2.0"
+edition = "2021"
 
 [lib]
 proc-macro = true
