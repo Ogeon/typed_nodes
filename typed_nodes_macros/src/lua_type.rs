@@ -2,7 +2,7 @@ use std::fmt;
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{parse::Parse, Error, Ident};
+use syn::{parse::Parse, Error, Ident, Type};
 
 macro_rules! make_lua_type {
     (
@@ -59,6 +59,7 @@ make_lua_type! {
         Number => number,
         Integer => integer,
         String => string,
+        Boolean => boolean,
     }
 }
 
@@ -76,42 +77,54 @@ impl LuaType {
             LuaType::Number => quote!(mlua::Value::Number(#value)),
             LuaType::Integer => quote!(mlua::Value::Integer(#value)),
             LuaType::String => quote!(mlua::Value::String(#value)),
+            LuaType::Boolean => quote!(mlua::Value::Boolean(#value)),
         }
     }
 
-    pub(crate) fn make_delegating_visitor_fn(&self, body: &TokenStream) -> TokenStream {
+    pub(crate) fn make_delegating_visitor_fn(
+        &self,
+        context_type: &Type,
+        body: &TokenStream,
+    ) -> TokenStream {
         match self {
             LuaType::Nil => {
                 quote! {
-                    fn visit_nil(&mut self, context: &mut __C) -> Result<Self::Output, __C::Error> {
+                    fn visit_nil(&mut self, context: &mut #context_type) -> Result<Self::Output, <#context_type as typed_nodes::FromLuaContext<'lua>>::Error> {
                         #body
                     }
                 }
             }
             LuaType::Table => {
                 quote! {
-                    fn visit_table(&mut self, value: mlua::Table<'lua>, context: &mut __C) -> Result<Self::Output, __C::Error> {
+                    fn visit_table(&mut self, value: mlua::Table<'lua>, context: &mut #context_type) -> Result<Self::Output, <#context_type as typed_nodes::FromLuaContext<'lua>>::Error> {
                         #body
                     }
                 }
             }
             LuaType::Number => {
                 quote! {
-                    fn visit_number(&mut self, value: f64, context: &mut __C) -> Result<Self::Output, __C::Error> {
+                    fn visit_number(&mut self, value: f64, context: &mut #context_type) -> Result<Self::Output, <#context_type as typed_nodes::FromLuaContext<'lua>>::Error> {
                         #body
                     }
                 }
             }
             LuaType::Integer => {
                 quote! {
-                    fn visit_integer(&mut self, value: i64, context: &mut __C) -> Result<Self::Output, __C::Error> {
+                    fn visit_integer(&mut self, value: i64, context: &mut #context_type) -> Result<Self::Output, <#context_type as typed_nodes::FromLuaContext<'lua>>::Error> {
                         #body
                     }
                 }
             }
             LuaType::String => {
                 quote! {
-                    fn visit_string(&mut self, value: mlua::String<'lua>, context: &mut __C) -> Result<Self::Output, __C::Error> {
+                    fn visit_string(&mut self, value: mlua::String<'lua>, context: &mut #context_type) -> Result<Self::Output, <#context_type as typed_nodes::FromLuaContext<'lua>>::Error> {
+                        #body
+                    }
+                }
+            }
+            LuaType::Boolean => {
+                quote! {
+                    fn visit_boolean(&mut self, value: bool, context: &mut #context_type) -> Result<Self::Output, <#context_type as typed_nodes::FromLuaContext<'lua>>::Error> {
                         #body
                     }
                 }

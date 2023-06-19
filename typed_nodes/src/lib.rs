@@ -3,7 +3,9 @@ use std::{any::TypeId, borrow::Borrow, collections::HashMap, hash::Hash, marker:
 use bounds::{BoundedBy, Bounds};
 use node_group::{BoxedNodeGroup, DynNodeGroup, GroupBounds, NodeGroup};
 pub use node_group::{DynKey, Key, ReservedKey};
-pub use parse::{Error, FromLua, FromLuaContext, TableId, TableIdSource, VisitLua, VisitTable};
+pub use parse::{
+    Error, FromLua, FromLuaContext, TableId, TableIdSource, VisitInteger, VisitLua, VisitTable,
+};
 
 pub mod bounds;
 mod node_group;
@@ -199,6 +201,18 @@ where
             .downcast_ref::<I, T>()
             .expect("node group should be possible to downcast")
             .get_key(id)
+    }
+}
+
+impl<I, B> Default for Nodes<I, B>
+where
+    B: Bounds,
+{
+    fn default() -> Self {
+        Self {
+            node_groups: Default::default(),
+            key_type: Default::default(),
+        }
     }
 }
 

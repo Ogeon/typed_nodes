@@ -1,13 +1,14 @@
 use std::collections::BTreeSet;
 
 use proc_macro2::Ident;
-use syn::{punctuated::Punctuated, Attribute, Error, Expr, Meta, MetaNameValue, Path, Token};
+use syn::{punctuated::Punctuated, Attribute, Error, Expr, Meta, MetaNameValue, Path, Token, Type};
 
 use crate::LuaType;
 
 #[derive(Default)]
 pub(crate) struct TypeOptions {
     pub(crate) is_node: bool,
+    pub(crate) from_lua_context: Option<Type>,
 }
 
 impl TypeOptions {
@@ -24,6 +25,24 @@ impl TypeOptions {
         match option.path().get_ident().map(Ident::to_string).as_deref() {
             Some("is_node") => {
                 self.is_node = true;
+                Ok(true)
+            }
+            Some("from_lua_context") => {
+                if self.from_lua_context.is_some() {
+                    return Err(Error::new_spanned(
+                        option,
+                        "multiple `from_lua_context` attributes",
+                    ));
+                }
+
+                let Meta::List(list) = &option else {
+                    return Err(
+                        Error::new_spanned(option, "expected `from_lua_context(MyContext<'lua>)`")
+                    );
+                };
+
+                self.from_lua_context = Some(list.parse_args()?);
+
                 Ok(true)
             }
             _ => Ok(false),
@@ -114,6 +133,8 @@ impl EnumOptions {
 #[derive(Default)]
 pub(crate) struct VariantOptions {
     pub(crate) untagged_as: BTreeSet<LuaType>,
+    pub(crate) default: bool,
+    pub(crate) skip: bool,
 }
 
 impl VariantOptions {
@@ -142,6 +163,8 @@ impl VariantOptions {
                             )?,
                         );
                     }
+                    Some("skip") => options.skip = true,
+                    Some("default") => options.default = true,
                     _ => return Err(Error::new_spanned(option, "unexpected variant attribute")),
                 }
             }
@@ -156,6 +179,7 @@ pub(crate) struct FieldOptions {
     pub(crate) flatten: bool,
     pub(crate) is_recursive: bool,
     pub(crate) parse_with: Option<Path>,
+    pub(crate) is_optional: bool,
 }
 
 impl FieldOptions {
@@ -191,6 +215,9 @@ impl FieldOptions {
                         };
 
                         options.parse_with = Some(path.path);
+                    }
+                    Some("optional") => {
+                        options.is_optional = true;
                     }
                     _ => {
                         return Err(Error::new_spanned(option, "unexpected field attribute"));

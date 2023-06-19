@@ -6,24 +6,34 @@ use crate::attribute_options::{FieldOptions, TypeOptions};
 
 pub(crate) fn add_where_clauses<'a>(
     where_clause: &mut WhereClause,
-    type_options: TypeOptions,
+    type_options: &TypeOptions,
     name: &Ident,
     generics: &Generics,
+    context_type: Option<&Type>,
     fields: impl Iterator<Item = (&'a Type, FieldOptions)>,
 ) {
-    where_clause
-        .predicates
-        .push(parse_quote!(__C: typed_nodes::FromLuaContext<'lua>));
+    if context_type.is_none() {
+        where_clause
+            .predicates
+            .push(parse_quote!(__C: typed_nodes::FromLuaContext<'lua>));
+    }
+
+    let context_type = context_type.cloned().unwrap_or_else(|| parse_quote!(__C));
+
     if type_options.is_node {
         where_clause.predicates.push(parse_quote!(
-            #name #generics: typed_nodes::bounds::BoundedBy<__C::NodeId, __C::Bounds>
+            #name #generics: typed_nodes::bounds::BoundedBy<
+                <#context_type as typed_nodes::Context>::NodeId,
+                <#context_type as typed_nodes::Context>::Bounds
+            >
         ));
     }
-    add_field_type_where_clauses(where_clause, fields)
+    add_field_type_where_clauses(where_clause, &context_type, fields)
 }
 
 fn add_field_type_where_clauses<'a>(
     where_clause: &mut WhereClause,
+    context_type: &Type,
     types: impl IntoIterator<Item = (&'a Type, FieldOptions)>,
 ) {
     struct TypeOptions {
@@ -64,7 +74,7 @@ fn add_field_type_where_clauses<'a>(
                     return None;
                 }
 
-                Some(parse_quote!(#field_type: typed_nodes::FromLua<'lua, __C>))
+                Some(parse_quote!(#field_type: typed_nodes::FromLua<'lua, #context_type>))
             },
         ));
 }

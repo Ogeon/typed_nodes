@@ -40,21 +40,36 @@ fn make_named_fields_parsing_code(
             }
         };
         let ident = field.ident.expect("all fields should be named");
+        let lua_name = ident.to_string();
 
         let get_from_lua = if always_flatten || field_options.flatten {
             lua_type.wrap_value_expression(!is_last)
         } else {
-            let lua_name = ident.to_string();
             quote!(value.get(#lua_name)?)
         };
 
-        parse_exprs.push(if let Some(parse_fn) = field_options.parse_with {
-            quote!(#parse_fn(#get_from_lua, context)?)
+        let expr = if let Some(parse_fn) = field_options.parse_with {
+            quote!(#parse_fn(#get_from_lua, context))
         } else {
             quote!(typed_nodes::FromLua::from_lua(
                 #get_from_lua,
                 context
-            )?)
+            ))
+        };
+
+        let expr = if field_options.flatten {
+            quote!(#expr?)
+        } else {
+            quote!(#expr.map_err(|mut error| {error.add_context_field_name(#lua_name); error})?)
+        };
+
+        parse_exprs.push(if field_options.is_optional {
+            quote!({
+                let maybe_value: Option<_> = #expr;
+                maybe_value.unwrap_or_else(Default::default)
+            })
+        } else {
+            expr
         });
 
         field_names.push(ident);
@@ -81,6 +96,8 @@ fn make_unnamed_fields_parsing_code(
             .enumerate()
             .with_is_last()
             .map(|(is_last, (index, field))| {
+                let index = index + 1;
+
                 let (field_options, error) = match FieldOptions::from_attributes(&field.attrs) {
                     Ok(options) => (options, None),
                     Err(error) => (FieldOptions::default(), Some(error.to_compile_error())),
@@ -89,20 +106,34 @@ fn make_unnamed_fields_parsing_code(
                 let get_from_lua = if always_flatten || field_options.flatten {
                     lua_type.wrap_value_expression(!is_last)
                 } else {
-                    let index = index + 1;
                     quote!(value.get(#index)?)
                 };
 
-                if let Some(parse_fn) = field_options.parse_with {
+                let expr = if let Some(parse_fn) = field_options.parse_with {
                     quote! {
                         #error
-                        #parse_fn(#get_from_lua, context)?
+                        #parse_fn(#get_from_lua, context)
                     }
                 } else {
                     quote! {
                         #error
-                        typed_nodes::FromLua::from_lua(#get_from_lua, context)?
+                        typed_nodes::FromLua::from_lua(#get_from_lua, context)
                     }
+                };
+
+                let expr = if field_options.flatten {
+                    quote!(#expr?)
+                } else {
+                    quote!(#expr.map_err(|mut error| {error.add_context_index(#index); error})?)
+                };
+
+                if field_options.is_optional {
+                    quote!({
+                        let maybe_value: Option<_> = #expr;
+                        maybe_value.unwrap_or_else(Default::default)
+                    })
+                } else {
+                    expr
                 }
             });
 

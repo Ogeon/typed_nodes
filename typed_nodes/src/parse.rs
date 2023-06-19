@@ -204,7 +204,13 @@ where
         VisitTable::visit(value, context, |value, context| {
             value
                 .sequence_values()
-                .map(|value| T::from_lua(value?, context))
+                .enumerate()
+                .map(|(index, value)| {
+                    T::from_lua(value?, context).map_err(|mut error| {
+                        error.add_context_index(index + 1);
+                        error
+                    })
+                })
                 .collect()
         })
     }
@@ -220,10 +226,24 @@ where
     fn from_lua(value: mlua::Value<'lua>, context: &mut C) -> Result<Self, C::Error> {
         VisitTable::visit(value, context, |value, context| {
             value
-                .pairs()
+                .pairs::<mlua::Value<'lua>, _>()
                 .map(|pair| {
                     let (key, value) = pair?;
-                    Ok((K::from_lua(key, context)?, V::from_lua(value, context)?))
+                    Ok((
+                        K::from_lua(key.clone(), context)?,
+                        V::from_lua(value, context).map_err(|mut error| {
+                            if let Ok(key) =
+                                <String as mlua::FromLua>::from_lua(key.clone(), context.get_lua())
+                            {
+                                error.add_context_field_name(&key);
+                            } else if let Ok(index) =
+                                <usize as mlua::FromLua>::from_lua(key, context.get_lua())
+                            {
+                                error.add_context_index(index);
+                            }
+                            error
+                        })?,
+                    ))
                 })
                 .collect()
         })
@@ -278,15 +298,25 @@ macro_rules! impl_from_lua_tuples {
                         $first $(+$ty)*
                     };
 
+                    fn add_context<T, E: Error>(index: usize, function: impl FnOnce() -> Result<T, E>) -> Result<T, E> {
+                        match function() {
+                            Ok(value) => Ok(value),
+                            Err(mut error) => {
+                                error.add_context_index(index);
+                                Err(error)
+                            }
+                        }
+                    }
+
                     let mut values = value.sequence_values();
                     #[allow(unused_mut)]
                     let mut index: usize = 0;
 
                     Ok((
-                        $first::from_lua(values.next().ok_or_else(||Context::Error::invalid_length(EXPECTED_LENGTH, index))??, context)?,
+                        add_context(index + 1, || $first::from_lua(values.next().ok_or_else(||Context::Error::invalid_length(EXPECTED_LENGTH, index))??, context))?,
                         $({
                             index += 1;
-                            $ty::from_lua(values.next().ok_or_else(||Context::Error::invalid_length(EXPECTED_LENGTH, index))??, context)?
+                            add_context(index + 1, || $ty::from_lua(values.next().ok_or_else(||Context::Error::invalid_length(EXPECTED_LENGTH, index))??, context))?
                         },)*
                     ))
                 })
@@ -366,7 +396,13 @@ impl TableIdSource {
     }
 }
 
-pub trait Error: Sized + From<mlua::Error> {
+impl Default for TableIdSource {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub trait Error: Sized + From<mlua::Error> + Display {
     fn custom<T>(message: T) -> Self
     where
         T: Display;
@@ -397,6 +433,14 @@ pub trait Error: Sized + From<mlua::Error> {
             ))
         }
     }
+
+    fn add_context_field_name(&mut self, name: &str) {
+        *self = Self::custom(format_args!("in {name}, {self}"))
+    }
+
+    fn add_context_index(&mut self, index: usize) {
+        *self = Self::custom(format_args!("in [{index}], {self}"))
+    }
 }
 
 impl Error for Box<dyn std::error::Error> {
@@ -417,9 +461,11 @@ impl Error for mlua::Error {
     }
 }
 
+/// A helper visitor for tables.
 pub struct VisitTable<F>(F);
 
 impl<F> VisitTable<F> {
+    #[inline(always)]
     pub fn visit<'lua, T, C>(
         value: mlua::Value<'lua>,
         context: &mut C,
@@ -441,11 +487,50 @@ where
 {
     type Output = T;
 
+    #[inline(always)]
     fn expected(&self) -> String {
         format!("a table")
     }
 
+    #[inline(always)]
     fn visit_table(&mut self, value: Table<'lua>, context: &mut C) -> Result<T, C::Error> {
+        self.0(value, context)
+    }
+}
+
+/// A helper visitor for integers.
+pub struct VisitInteger<F>(F);
+
+impl<F> VisitInteger<F> {
+    #[inline(always)]
+    pub fn visit<'lua, T, C>(
+        value: mlua::Value<'lua>,
+        context: &mut C,
+        visit: F,
+    ) -> Result<T, C::Error>
+    where
+        C: FromLuaContext<'lua>,
+        F: FnMut(mlua::Integer, &mut C) -> Result<T, C::Error>,
+    {
+        let mut visitor = Self(visit);
+        visitor.visit_lua(value, context)
+    }
+}
+
+impl<'lua, C, T, F> VisitLua<'lua, C> for VisitInteger<F>
+where
+    C: FromLuaContext<'lua>,
+    F: FnMut(mlua::Integer, &mut C) -> Result<T, C::Error>,
+{
+    type Output = T;
+
+    #[inline(always)]
+    fn expected(&self) -> String {
+        format!("an integer")
+    }
+
+    #[inline(always)]
+    fn visit_integer(&mut self, value: mlua::Integer, context: &mut C) -> Result<T, C::Error> {
         self.0(value, context)
     }
 }
