@@ -3,12 +3,14 @@ use std::collections::BTreeSet;
 use proc_macro2::Ident;
 use syn::{punctuated::Punctuated, Attribute, Error, Expr, Meta, MetaNameValue, Path, Token, Type};
 
-use crate::LuaType;
+use crate::lua_type::LuaType;
 
 #[derive(Default)]
 pub(crate) struct TypeOptions {
     pub(crate) is_node: bool,
     pub(crate) from_lua_context: Option<Type>,
+    pub(crate) lua_metatable: Option<Expr>,
+    pub(crate) lua_base_type: Option<Type>,
 }
 
 impl TypeOptions {
@@ -42,6 +44,42 @@ impl TypeOptions {
                 };
 
                 self.from_lua_context = Some(list.parse_args()?);
+
+                Ok(true)
+            }
+            Some("lua_metatable") => {
+                if self.lua_metatable.is_some() {
+                    return Err(Error::new_spanned(
+                        option,
+                        "multiple `lua_metatable` attributes",
+                    ));
+                }
+
+                let Meta::NameValue(value) = &option else {
+                    return Err(
+                        Error::new_spanned(option, "expected `lua_metatable = \"MyMetatable\"`")
+                    );
+                };
+
+                self.lua_metatable = Some(value.value.clone());
+
+                Ok(true)
+            }
+            Some("lua_base_type") => {
+                if self.lua_base_type.is_some() {
+                    return Err(Error::new_spanned(
+                        option,
+                        "multiple `lua_base_type` attributes",
+                    ));
+                }
+
+                let Meta::List(list) = &option else {
+                    return Err(
+                        Error::new_spanned(option, "expected `lua_base_type(MyType)`")
+                    );
+                };
+
+                self.lua_base_type = Some(list.parse_args()?);
 
                 Ok(true)
             }
@@ -135,6 +173,9 @@ pub(crate) struct VariantOptions {
     pub(crate) untagged_as: BTreeSet<LuaType>,
     pub(crate) default: bool,
     pub(crate) skip: bool,
+    pub(crate) skip_method: bool,
+    pub(crate) lua_base_type: Option<Type>,
+    pub(crate) lua_method: Option<Expr>,
 }
 
 impl VariantOptions {
@@ -165,6 +206,39 @@ impl VariantOptions {
                     }
                     Some("skip") => options.skip = true,
                     Some("default") => options.default = true,
+                    Some("skip_method") => options.skip_method = true,
+                    Some("lua_base_type") => {
+                        if options.lua_base_type.is_some() {
+                            return Err(Error::new_spanned(
+                                option,
+                                "multiple `lua_base_type` attributes",
+                            ));
+                        }
+
+                        let Meta::List(list) = &option else {
+                            return Err(
+                                Error::new_spanned(option, "expected `lua_base_type(MyType)`")
+                            );
+                        };
+
+                        options.lua_base_type = Some(list.parse_args()?);
+                    }
+                    Some("lua_method") => {
+                        if options.lua_method.is_some() {
+                            return Err(Error::new_spanned(
+                                option,
+                                "multiple `lua_method` attributes",
+                            ));
+                        }
+
+                        let Meta::NameValue(value) = &option else {
+                            return Err(
+                                Error::new_spanned(option, "expected `lua_method = \"my_method\"`")
+                            );
+                        };
+
+                        options.lua_method = Some(value.value.clone());
+                    }
                     _ => return Err(Error::new_spanned(option, "unexpected variant attribute")),
                 }
             }
@@ -174,12 +248,14 @@ impl VariantOptions {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct FieldOptions {
     pub(crate) flatten: bool,
     pub(crate) is_recursive: bool,
     pub(crate) parse_with: Option<Path>,
     pub(crate) is_optional: bool,
+    pub(crate) lua_self: bool,
+    pub(crate) lua_arguments: bool,
 }
 
 impl FieldOptions {
@@ -219,6 +295,8 @@ impl FieldOptions {
                     Some("optional") => {
                         options.is_optional = true;
                     }
+                    Some("lua_self") => options.lua_self = true,
+                    Some("lua_arguments") => options.lua_arguments = true,
                     _ => {
                         return Err(Error::new_spanned(option, "unexpected field attribute"));
                     }

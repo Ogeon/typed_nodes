@@ -10,12 +10,12 @@ pub(crate) fn add_where_clauses<'a>(
     name: &Ident,
     generics: &Generics,
     context_type: Option<&Type>,
-    fields: impl Iterator<Item = (&'a Type, FieldOptions)>,
+    fields: impl Iterator<Item = (&'a Type, &'a FieldOptions)>,
 ) {
     if context_type.is_none() {
         where_clause
             .predicates
-            .push(parse_quote!(__C: typed_nodes::FromLuaContext<'lua>));
+            .push(parse_quote!(__C: typed_nodes::mlua::FromLuaContext<'lua>));
     }
 
     let context_type = context_type.cloned().unwrap_or_else(|| parse_quote!(__C));
@@ -34,7 +34,7 @@ pub(crate) fn add_where_clauses<'a>(
 fn add_field_type_where_clauses<'a>(
     where_clause: &mut WhereClause,
     context_type: &Type,
-    types: impl IntoIterator<Item = (&'a Type, FieldOptions)>,
+    types: impl IntoIterator<Item = (&'a Type, &'a FieldOptions)>,
 ) {
     struct TypeOptions {
         exclue: bool,
@@ -46,8 +46,8 @@ fn add_field_type_where_clauses<'a>(
         }
     }
 
-    impl From<FieldOptions> for TypeOptions {
-        fn from(field_options: FieldOptions) -> Self {
+    impl From<&FieldOptions> for TypeOptions {
+        fn from(field_options: &FieldOptions) -> Self {
             Self {
                 exclue: field_options.is_recursive || field_options.parse_with.is_some(),
             }
@@ -74,7 +74,7 @@ fn add_field_type_where_clauses<'a>(
                     return None;
                 }
 
-                Some(parse_quote!(#field_type: typed_nodes::FromLua<'lua, #context_type>))
+                Some(parse_quote!(#field_type: typed_nodes::mlua::FromLua<'lua, #context_type>))
             },
         ));
 }

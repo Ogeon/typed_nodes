@@ -3,13 +3,10 @@ use std::{any::TypeId, borrow::Borrow, collections::HashMap, hash::Hash, marker:
 use bounds::{BoundedBy, Bounds};
 use node_group::{BoxedNodeGroup, DynNodeGroup, GroupBounds, NodeGroup};
 pub use node_group::{DynKey, Key, ReservedKey};
-pub use parse::{
-    Error, FromLua, FromLuaContext, TableId, TableIdSource, VisitInteger, VisitLua, VisitTable,
-};
 
 pub mod bounds;
+pub mod mlua;
 mod node_group;
-mod parse;
 
 type BoxedGroupOf<B> = <<B as Bounds>::GroupBounds as GroupBounds>::BoxedGroup<B>;
 
