@@ -1,5 +1,6 @@
-use std::{collections::BTreeMap, io::Write};
+use std::{any::TypeId, collections::BTreeMap, io::Write};
 
+use ahash::AHashSet;
 use mlua::Table;
 
 pub use typed_nodes_macros::GenerateLua;
@@ -12,13 +13,19 @@ pub trait GenerateLua {
 
 pub struct LuaModule {
     metatables: BTreeMap<&'static str, Metatable>,
+    visited_types: AHashSet<TypeId>,
 }
 
 impl LuaModule {
     pub fn new() -> Self {
         Self {
             metatables: BTreeMap::new(),
+            visited_types: AHashSet::new(),
         }
+    }
+
+    pub fn visit_type<T: 'static>(&mut self) -> bool {
+        self.visited_types.insert(TypeId::of::<T>())
     }
 
     pub fn add_method(

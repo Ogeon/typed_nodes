@@ -32,6 +32,10 @@ pub(crate) fn derive_for_struct(struct_data: StructData) -> TokenStream {
             }
 
             fn generate_lua(module: &mut typed_nodes::mlua::LuaModule) {
+                if !module.visit_type::<Self>() {
+                    return;
+                }
+
                 #base_type_delegate;
 
                 let new_method = #new_method;
@@ -112,6 +116,10 @@ pub(crate) fn derive_for_enum(enum_data: EnumData) -> TokenStream {
             }
 
             fn generate_lua(module: &mut typed_nodes::mlua::LuaModule) {
+                if !module.visit_type::<Self>() {
+                    return;
+                }
+
                 #(#base_type_delegates;)*
 
                 #(#variant_code)*
