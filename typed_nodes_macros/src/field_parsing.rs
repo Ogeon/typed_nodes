@@ -60,8 +60,10 @@ fn make_named_fields_parsing_code(
         };
 
         parse_exprs.push(if field_options.is_optional {
+            let field_type = field.ty;
+
             quote!({
-                let maybe_value: Option<_> = #expr;
+                let maybe_value: Option<#field_type> = #expr;
                 maybe_value.unwrap_or_else(Default::default)
             })
         } else {
@@ -117,8 +119,10 @@ fn make_unnamed_fields_parsing_code(
                 };
 
                 if field_options.is_optional {
+                    let field_type = field.ty;
+
                     quote!({
-                        let maybe_value: Option<_> = #expr;
+                        let maybe_value: Option<#field_type> = #expr;
                         maybe_value.unwrap_or_else(Default::default)
                     })
                 } else {
