@@ -83,48 +83,48 @@ impl LuaType {
 
     pub(crate) fn make_delegating_visitor_fn(
         &self,
-        context_type: &Type,
+        bounds_type: &Type,
         body: &TokenStream,
     ) -> TokenStream {
         match self {
             LuaType::Nil => {
                 quote! {
-                    fn visit_nil(&mut self, context: &mut #context_type) -> Result<Self::Output, <#context_type as typed_nodes::mlua::FromLuaContext<'lua>>::Error> {
+                    fn visit_nil(&mut self, context: &mut typed_nodes::mlua::Context<'lua, #bounds_type>) -> mlua::Result<Self::Output> {
                         #body
                     }
                 }
             }
             LuaType::Table => {
                 quote! {
-                    fn visit_table(&mut self, value: mlua::Table<'lua>, context: &mut #context_type) -> Result<Self::Output, <#context_type as typed_nodes::mlua::FromLuaContext<'lua>>::Error> {
+                    fn visit_table(&mut self, value: mlua::Table<'lua>, context: &mut typed_nodes::mlua::Context<'lua, #bounds_type>) -> mlua::Result<Self::Output> {
                         #body
                     }
                 }
             }
             LuaType::Number => {
                 quote! {
-                    fn visit_number(&mut self, value: f64, context: &mut #context_type) -> Result<Self::Output, <#context_type as typed_nodes::mlua::FromLuaContext<'lua>>::Error> {
+                    fn visit_number(&mut self, value: f64, context: &mut typed_nodes::mlua::Context<'lua, #bounds_type>) -> mlua::Result<Self::Output> {
                         #body
                     }
                 }
             }
             LuaType::Integer => {
                 quote! {
-                    fn visit_integer(&mut self, value: i64, context: &mut #context_type) -> Result<Self::Output, <#context_type as typed_nodes::mlua::FromLuaContext<'lua>>::Error> {
+                    fn visit_integer(&mut self, value: i64, context: &mut typed_nodes::mlua::Context<'lua, #bounds_type>) -> mlua::Result<Self::Output> {
                         #body
                     }
                 }
             }
             LuaType::String => {
                 quote! {
-                    fn visit_string(&mut self, value: mlua::String<'lua>, context: &mut #context_type) -> Result<Self::Output, <#context_type as typed_nodes::mlua::FromLuaContext<'lua>>::Error> {
+                    fn visit_string(&mut self, value: mlua::String<'lua>, context: &mut typed_nodes::mlua::Context<'lua, #bounds_type>) -> mlua::Result<Self::Output> {
                         #body
                     }
                 }
             }
             LuaType::Boolean => {
                 quote! {
-                    fn visit_boolean(&mut self, value: bool, context: &mut #context_type) -> Result<Self::Output, <#context_type as typed_nodes::mlua::FromLuaContext<'lua>>::Error> {
+                    fn visit_boolean(&mut self, value: bool, context: &mut typed_nodes::mlua::Context<'lua, #bounds_type>) -> mlua::Result<Self::Output> {
                         #body
                     }
                 }

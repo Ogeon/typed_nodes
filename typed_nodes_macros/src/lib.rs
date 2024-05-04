@@ -9,7 +9,6 @@ mod generate_lua;
 mod iter_ext;
 mod lua_type;
 mod type_data;
-mod where_clause;
 
 const DEFAULT_TAG_NAME: &str = "type";
 

@@ -9,7 +9,6 @@ use crate::{
     field_parsing::make_fields_parsing_code,
     lua_type::LuaType,
     type_data::{EnumData, StructData},
-    where_clause::add_where_clauses,
     DEFAULT_TAG_NAME,
 };
 
@@ -21,31 +20,8 @@ pub(crate) fn derive_for_struct(struct_data: StructData) -> TokenStream {
         fields,
     } = struct_data;
 
-    let context_type_param = struct_options
-        .type_options
-        .from_lua_context
-        .is_none()
-        .then(|| parse_quote!(__C));
-
     let mut impl_generics = generics.clone();
     impl_generics.params.push(parse_quote!('lua));
-
-    if let Some(parm) = context_type_param {
-        impl_generics.params.push(parm);
-    }
-
-    {
-        let where_clause = impl_generics.make_where_clause();
-
-        add_where_clauses(
-            where_clause,
-            &struct_options.type_options,
-            &name,
-            &generics,
-            struct_options.type_options.from_lua_context.as_ref(),
-            fields.fields().map(|field| (&field.ty, &field.options)),
-        );
-    }
 
     let function_body = make_fields_parsing_code(
         Path::from(Ident::new("Self", Span::call_site())),
@@ -55,14 +31,15 @@ pub(crate) fn derive_for_struct(struct_data: StructData) -> TokenStream {
     );
     let where_clause = impl_generics.where_clause.take();
     let (_, generics, _) = generics.split_for_impl();
-    let context_type = struct_options
-        .type_options
-        .from_lua_context
-        .unwrap_or_else(|| parse_quote!(__C));
+    let bounds_type: Type = if struct_options.type_options.sync {
+        parse_quote!(typed_nodes::bounds::SendSyncBounds)
+    } else {
+        parse_quote!(typed_nodes::bounds::AnyBounds)
+    };
 
     quote! {
-        impl #impl_generics typed_nodes::mlua::FromLua<'lua, #context_type> for #name #generics #where_clause {
-            fn from_lua(value: mlua::Value<'lua>, context: &mut #context_type) -> Result<Self, <#context_type as typed_nodes::mlua::FromLuaContext<'lua>>::Error> {
+        impl #impl_generics typed_nodes::mlua::FromLua<'lua, #bounds_type> for #name #generics #where_clause {
+            fn from_lua(value: mlua::Value<'lua>, context: &mut typed_nodes::mlua::Context<'lua, #bounds_type>) -> mlua::Result<Self> {
                 use typed_nodes::mlua::Error as _;
 
                 typed_nodes::mlua::VisitTable::visit(value, context, |value, context|{
@@ -81,36 +58,8 @@ pub(crate) fn derive_for_enum(enum_data: EnumData) -> TokenStream {
         variants,
     } = enum_data;
 
-    let context_type_param = enum_options
-        .type_options
-        .from_lua_context
-        .is_none()
-        .then(|| parse_quote!(__C));
-
     let mut impl_generics = generics.clone();
     impl_generics.params.push(parse_quote!('lua));
-
-    if let Some(parm) = context_type_param {
-        impl_generics.params.push(parm);
-    }
-
-    {
-        let where_clause = impl_generics.make_where_clause();
-        let fields = variants
-            .iter()
-            .filter(|variant| !variant.options.skip)
-            .flat_map(|variant| variant.fields.fields())
-            .map(|field| (&field.ty, &field.options));
-
-        add_where_clauses(
-            where_clause,
-            &enum_options.type_options,
-            &name,
-            &generics,
-            enum_options.type_options.from_lua_context.as_ref(),
-            fields,
-        );
-    }
 
     let mut variant_names_bytes = Vec::with_capacity(variants.len());
     let mut variant_names_str = Vec::with_capacity(variants.len());
@@ -186,10 +135,11 @@ pub(crate) fn derive_for_enum(enum_data: EnumData) -> TokenStream {
 
     let where_clause = impl_generics.where_clause.take();
     let (visitor_generics, generics, _) = generics.split_for_impl();
-    let context_type = enum_options
-        .type_options
-        .from_lua_context
-        .unwrap_or_else(|| parse_quote!(__C));
+    let bounds_type: Type = if enum_options.type_options.sync {
+        parse_quote!(typed_nodes::bounds::SendSyncBounds)
+    } else {
+        parse_quote!(typed_nodes::bounds::AnyBounds)
+    };
 
     let table_visitor = make_enum_table_visitor_fn(
         enum_options.tag_name.as_deref().unwrap_or(DEFAULT_TAG_NAME),
@@ -198,7 +148,7 @@ pub(crate) fn derive_for_enum(enum_data: EnumData) -> TokenStream {
         &variant_names_str,
         untagged_bodies.remove(&LuaType::Table),
         default_body,
-        &context_type,
+        &bounds_type,
     );
     let string_visitor = make_enum_string_visitor_fn(
         &variant_bodies,
@@ -206,7 +156,7 @@ pub(crate) fn derive_for_enum(enum_data: EnumData) -> TokenStream {
         &variant_names_str,
         untagged_bodies.remove(&LuaType::String),
         all_are_empty,
-        &context_type,
+        &bounds_type,
     );
 
     let mut expected_types: Vec<_> = untagged_bodies
@@ -227,16 +177,16 @@ pub(crate) fn derive_for_enum(enum_data: EnumData) -> TokenStream {
 
     let untagged_visitors = untagged_bodies
         .into_iter()
-        .map(|(lua_type, body)| lua_type.make_delegating_visitor_fn(&context_type, &body));
+        .map(|(lua_type, body)| lua_type.make_delegating_visitor_fn(&bounds_type, &body));
 
     quote! {
-        impl #impl_generics typed_nodes::mlua::FromLua<'lua, #context_type> for #name #generics #where_clause {
-            fn from_lua(value: mlua::Value<'lua>, context: &mut #context_type) -> Result<Self, <#context_type as typed_nodes::mlua::FromLuaContext<'lua>>::Error> {
+        impl #impl_generics typed_nodes::mlua::FromLua<'lua, #bounds_type> for #name #generics #where_clause {
+            fn from_lua(value: mlua::Value<'lua>, context: &mut typed_nodes::mlua::Context<'lua, #bounds_type>) -> mlua::Result<Self> {
                 use typed_nodes::mlua::Error as _;
 
                 struct __Visitor #visitor_generics (std::marker::PhantomData<fn() -> #name #generics>);
 
-                impl #impl_generics typed_nodes::mlua::VisitLua<'lua, #context_type> for __Visitor #generics #where_clause {
+                impl #impl_generics typed_nodes::mlua::VisitLua<'lua, #bounds_type> for __Visitor #generics #where_clause {
                     type Output = #name #generics;
 
                     fn expected(&self) -> String {
@@ -263,7 +213,7 @@ fn make_enum_table_visitor_fn(
     variant_names_str: &[String],
     untagged_body: Option<TokenStream>,
     default_body: Option<TokenStream>,
-    context_type: &Type,
+    bounds_type: &Type,
 ) -> Option<TokenStream> {
     if !variant_bodies.is_empty() {
         let untagged_arm = if let Some(body) = untagged_body {
@@ -282,7 +232,7 @@ fn make_enum_table_visitor_fn(
         };
 
         Some(quote! {
-            fn visit_table(&mut self, value: mlua::Table<'lua>, context: &mut #context_type) -> Result<Self::Output, <#context_type as typed_nodes::mlua::FromLuaContext<'lua>>::Error> {
+            fn visit_table(&mut self, value: mlua::Table<'lua>, context: &mut typed_nodes::mlua::Context<'lua, #bounds_type>) -> mlua::Result<Self::Output> {
                 let variant = value.get::<_, Option<mlua::String>>(#tag_name)?;
                 match variant.as_ref().map(mlua::String::as_bytes) {
                     #(Some(#variant_names_bytes) => {#variant_bodies},)*
@@ -292,7 +242,7 @@ fn make_enum_table_visitor_fn(
             }
         })
     } else if let Some(body) = untagged_body {
-        Some(LuaType::Table.make_delegating_visitor_fn(context_type, &body))
+        Some(LuaType::Table.make_delegating_visitor_fn(bounds_type, &body))
     } else {
         None
     }
@@ -304,7 +254,7 @@ fn make_enum_string_visitor_fn(
     variant_names_str: &[String],
     untagged_body: Option<TokenStream>,
     all_are_empty: bool,
-    context_type: &Type,
+    bounds_type: &Type,
 ) -> Option<TokenStream> {
     if all_are_empty {
         let default_string_body = if let Some(body) = untagged_body {
@@ -314,7 +264,7 @@ fn make_enum_string_visitor_fn(
         };
 
         Some(quote! {
-            fn visit_string(&mut self, value: mlua::String<'lua>, context: &mut #context_type) -> Result<Self::Output, <#context_type as typed_nodes::mlua::FromLuaContext<'lua>>::Error> {
+            fn visit_string(&mut self, value: mlua::String<'lua>, context: &mut typed_nodes::mlua::Context<'lua, #bounds_type>) -> mlua::Result<Self::Output> {
                 match value.as_bytes() {
                     #(#variant_names_bytes => {#variant_bodies},)*
                     _ => #default_string_body,
@@ -322,7 +272,7 @@ fn make_enum_string_visitor_fn(
             }
         })
     } else if let Some(body) = untagged_body {
-        Some(LuaType::String.make_delegating_visitor_fn(context_type, &body))
+        Some(LuaType::String.make_delegating_visitor_fn(bounds_type, &body))
     } else {
         None
     }

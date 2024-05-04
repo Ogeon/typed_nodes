@@ -6,48 +6,53 @@ use std::{
 
 use mlua::Value;
 
-use crate::{BoundedBy, Key};
+use crate::{
+    bounds::{BoundedBy, Bounds},
+    Key,
+};
 
 pub use typed_nodes_macros::FromLua;
 
-use super::{Error, FromLuaContext, TableId, VisitTable};
+use super::{Context, Error, TableId, VisitTable};
 
-pub trait FromLua<'lua, C: FromLuaContext<'lua>>: Sized {
+pub trait FromLua<'lua, B>: Sized + BoundedBy<TableId, B>
+where
+    B: Bounds,
+{
     /// Try to convert from any Lua value.
-    fn from_lua(value: mlua::Value<'lua>, context: &mut C) -> Result<Self, C::Error>;
+    fn from_lua(value: mlua::Value<'lua>, context: &mut Context<'lua, B>) -> mlua::Result<Self>;
 }
 
-impl<'lua, T, C> FromLua<'lua, C> for Key<T>
+impl<'lua, T, B> FromLua<'lua, B> for Key<T>
 where
-    T: FromLua<'lua, C> + BoundedBy<C::NodeId, C::Bounds>,
-    C: FromLuaContext<'lua>,
+    T: FromLua<'lua, B>,
+    B: Bounds,
+    Self: BoundedBy<TableId, B>,
 {
-    fn from_lua(value: mlua::Value<'lua>, context: &mut C) -> Result<Self, C::Error> {
+    fn from_lua(value: mlua::Value<'lua>, context: &mut Context<'lua, B>) -> mlua::Result<Self> {
         VisitTable::visit(value, context, |value, context| {
-            let id = TableId::get_or_assign(&value, context)?;
-            let id = context.table_id_to_node_id(id);
+            let id = TableId::get_or_assign(&value)?;
 
-            //let id = TableId::of(&value).into();
-
-            if let Some(key) = context.get_nodes_mut().get_key(&id) {
+            if let Some(key) = context.nodes.get_key(&id) {
                 return Ok(key);
             }
 
             // Reserve a slot in case of circular references.
-            let (reserved_key, _) = context.get_nodes_mut().reserve_with_id(id);
+            let (reserved_key, _) = context.nodes.reserve_with_id(id);
             let node = T::from_lua(Value::Table(value), &mut *context)?;
 
-            Ok(context.get_nodes_mut().insert_reserved(reserved_key, node))
+            Ok(context.nodes.insert_reserved(reserved_key, node))
         })
     }
 }
 
-impl<'lua, T, C> FromLua<'lua, C> for Vec<T>
+impl<'lua, T, B> FromLua<'lua, B> for Vec<T>
 where
-    T: FromLua<'lua, C>,
-    C: FromLuaContext<'lua>,
+    T: FromLua<'lua, B>,
+    B: Bounds,
+    Self: BoundedBy<TableId, B>,
 {
-    fn from_lua(value: mlua::Value<'lua>, context: &mut C) -> Result<Self, C::Error> {
+    fn from_lua(value: mlua::Value<'lua>, context: &mut Context<'lua, B>) -> mlua::Result<Self> {
         VisitTable::visit(value, context, |value, context| {
             value
                 .sequence_values()
@@ -63,14 +68,15 @@ where
     }
 }
 
-impl<'lua, K, V, S, C> FromLua<'lua, C> for HashMap<K, V, S>
+impl<'lua, K, V, S, B> FromLua<'lua, B> for HashMap<K, V, S>
 where
-    C: FromLuaContext<'lua>,
-    K: FromLua<'lua, C> + Eq + Hash,
-    V: FromLua<'lua, C>,
+    K: FromLua<'lua, B> + Eq + Hash,
+    V: FromLua<'lua, B>,
     S: BuildHasher + Default + Send + Sync,
+    B: Bounds,
+    Self: BoundedBy<TableId, B>,
 {
-    fn from_lua(value: mlua::Value<'lua>, context: &mut C) -> Result<Self, C::Error> {
+    fn from_lua(value: mlua::Value<'lua>, context: &mut Context<'lua, B>) -> mlua::Result<Self> {
         VisitTable::visit(value, context, |value, context| {
             value
                 .pairs::<mlua::Value<'lua>, _>()
@@ -80,11 +86,11 @@ where
                         K::from_lua(key.clone(), context)?,
                         V::from_lua(value, context).map_err(|mut error| {
                             if let Ok(key) =
-                                <String as mlua::FromLua>::from_lua(key.clone(), context.get_lua())
+                                <String as mlua::FromLua>::from_lua(key.clone(), context.lua)
                             {
                                 error.add_context_field_name(&key);
                             } else if let Ok(index) =
-                                <usize as mlua::FromLua>::from_lua(key, context.get_lua())
+                                <usize as mlua::FromLua>::from_lua(key, context.lua)
                             {
                                 error.add_context_index(index);
                             }
@@ -97,12 +103,13 @@ where
     }
 }
 
-impl<'lua, T, C> FromLua<'lua, C> for Option<T>
+impl<'lua, T, B> FromLua<'lua, B> for Option<T>
 where
-    T: FromLua<'lua, C>,
-    C: FromLuaContext<'lua>,
+    T: FromLua<'lua, B>,
+    B: Bounds,
+    Self: BoundedBy<TableId, B>,
 {
-    fn from_lua(value: Value<'lua>, context: &mut C) -> Result<Self, C::Error> {
+    fn from_lua(value: Value<'lua>, context: &mut Context<'lua, B>) -> mlua::Result<Self> {
         match value {
             Value::Nil => Ok(None),
             value => T::from_lua(value, context).map(Some),
@@ -110,13 +117,14 @@ where
     }
 }
 
-impl<'a, 'lua, T, C> FromLua<'lua, C> for Cow<'a, T>
+impl<'a, 'lua, T, B> FromLua<'lua, B> for Cow<'a, T>
 where
     T: ToOwned + ?Sized + Send + Sync,
-    T::Owned: FromLua<'lua, C>,
-    C: FromLuaContext<'lua>,
+    T::Owned: FromLua<'lua, B>,
+    B: Bounds,
+    Self: BoundedBy<TableId, B>,
 {
-    fn from_lua(value: Value<'lua>, context: &mut C) -> Result<Self, C::Error> {
+    fn from_lua(value: Value<'lua>, context: &mut Context<'lua, B>) -> mlua::Result<Self> {
         T::Owned::from_lua(value, context).map(Cow::Owned)
     }
 }
@@ -125,17 +133,17 @@ macro_rules! impl_from_lua_tuples {
     ($first:ident $(,$ty:ident)* ) => {
         impl_from_lua_tuples!($($ty),*);
 
-        impl<'lua, $first $(,$ty)*, Context> FromLua<'lua, Context> for ($first $(,$ty)*,)
+        impl<'lua, $first $(,$ty)*, _B> FromLua<'lua, _B> for ($first $(,$ty)*,)
         where
-            $first: FromLua<'lua, Context>,
+            $first: FromLua<'lua, _B>,
             $(
-                $ty: FromLua<'lua, Context>,
+                $ty: FromLua<'lua, _B>,
             )*
-            Context: FromLuaContext<'lua>,
-            Self: BoundedBy<Context::NodeId, Context::Bounds>
+            _B: Bounds,
+            Self: BoundedBy<TableId, _B>,
         {
 
-            fn from_lua(value: mlua::Value<'lua>, context: &mut Context) -> Result<Self, Context::Error> {
+            fn from_lua(value: mlua::Value<'lua>, context: &mut Context<'lua, _B>) -> mlua::Result<Self> {
                 VisitTable::visit(value, context, |value, context| {
                     const EXPECTED_LENGTH: usize = {
                         // Maybe weird to be const, but it works well with the uppercase names :)
@@ -160,10 +168,10 @@ macro_rules! impl_from_lua_tuples {
                     let mut index: usize = 0;
 
                     Ok((
-                        add_context(index + 1, || $first::from_lua(values.next().ok_or_else(||Context::Error::invalid_length(EXPECTED_LENGTH, index))??, context))?,
+                        add_context(index + 1, || $first::from_lua(values.next().ok_or_else(|| mlua::Error::invalid_length(EXPECTED_LENGTH, index))??, context))?,
                         $({
                             index += 1;
-                            add_context(index + 1, || $ty::from_lua(values.next().ok_or_else(||Context::Error::invalid_length(EXPECTED_LENGTH, index))??, context))?
+                            add_context(index + 1, || $ty::from_lua(values.next().ok_or_else(|| mlua::Error::invalid_length(EXPECTED_LENGTH, index))??, context))?
                         },)*
                     ))
                 })
@@ -178,12 +186,13 @@ impl_from_lua_tuples!(A, B, C, D, E, F, G, H);
 
 macro_rules! impl_from_lua_delegate {
     ($($self_ty:ty),+) => {$(
-        impl<'lua, C> FromLua<'lua, C> for $self_ty
+        impl<'lua, B> FromLua<'lua, B> for $self_ty
         where
-            C: FromLuaContext<'lua>,
+            B: Bounds,
+            Self: BoundedBy<TableId, B>,
         {
-            fn from_lua(value: Value<'lua>, context: &mut C) -> Result<Self, C::Error> {
-                mlua::FromLua::from_lua(value, context.get_lua()).map_err(C::Error::from)
+            fn from_lua(value: Value<'lua>, context: &mut Context<'lua, B>) -> mlua::Result<Self> {
+                mlua::FromLua::from_lua(value, context.lua)
             }
         }
     )+};

@@ -72,7 +72,7 @@ It's also possible to generate graphs from Lua values, currently using `mlua`. T
 
 ```rust
 use typed_nodes::{
-    mlua::{FromLua, FromLuaContext, GenerateLua, LuaModule, TableId, TableIdSource},
+    mlua::{Context, FromLua, GenerateLua, LuaModule},
     Key, Nodes,
 };
 use mlua::Lua;
@@ -100,7 +100,6 @@ impl UintExpression {
 #[typed_nodes(lua_metatable = "Uint")]
 enum CompoundUintExpression {
     Add {
-        #[typed_nodes(recursive)] // Breaks infinite loops in trait resolver.
         #[typed_nodes(lua_self)] // Assigns `self` as `lhs` in Lua.
         lhs: UintExpression,
         rhs: UintExpression,
@@ -143,42 +142,6 @@ impl BoolExpression {
     }
 }
 
-// Some resources for the Lua parsing.
-struct Context<'lua> {
-    nodes: Nodes<TableId>, // Use an ID to be able to identify Lua tables.
-    lua: &'lua Lua,
-    table_id_source: TableIdSource // Produces table IDs while parsing.
-}
-
-impl<'lua> typed_nodes::Context for Context<'lua> {
-    type NodeId = TableId;
-    type Bounds = typed_nodes::bounds::AnyBounds;
-
-    fn get_nodes(&self) -> &Nodes<Self::NodeId, Self::Bounds> {
-        &self.nodes
-    }
-
-    fn get_nodes_mut(&mut self) -> &mut Nodes<Self::NodeId, Self::Bounds> {
-        &mut self.nodes
-    }
-}
-
-impl<'lua> FromLuaContext<'lua> for Context<'lua> {
-    type Error = mlua::Error;
-
-    fn get_lua(&self) -> &'lua mlua::Lua {
-        &self.lua
-    }
-
-    fn table_id_to_node_id(&self, id: TableId) -> Self::NodeId {
-        id
-    }
-
-    fn next_table_id(&mut self) -> TableId {
-        self.table_id_source.next_table_id()
-    }
-}
-
 let lua = Lua::new();
 
 // This is an abstract representation of the Lua module we are about to generate.
@@ -191,18 +154,14 @@ BoolExpression::generate_lua(&mut module);
 let table = module.load_into_table(&lua).unwrap();
 lua.globals().set("my_lib", table).unwrap();
 
-let mut context = Context {
-    nodes: Nodes::new(),
-    lua: &lua,
-    table_id_source: TableIdSource::new(),
-};
+let mut nodes = Nodes::new();
 
 let value = lua.load(r#" my_lib.Uint.add(1, 2):equal(3) "#).eval().unwrap();
 
 // Parses the expression and inserts it in `context.nodes`.
-let check_equality = Key::<BoolExpression>::from_lua(value, &mut context).unwrap();
+let check_equality = Key::<BoolExpression>::from_lua(value, &mut Context::new(&lua, &mut nodes)).unwrap();
 
-assert!(context.nodes.get(check_equality).unwrap().evaluate(&context.nodes));
+assert!(nodes.get(check_equality).unwrap().evaluate(&nodes));
 ```
 
 ## License

@@ -8,7 +8,7 @@ use crate::lua_type::LuaType;
 #[derive(Default)]
 pub(crate) struct TypeOptions {
     pub(crate) is_node: bool,
-    pub(crate) from_lua_context: Option<Type>,
+    pub(crate) sync: bool,
     pub(crate) lua_metatable: Option<Expr>,
     pub(crate) lua_base_type: Option<Type>,
 }
@@ -29,21 +29,15 @@ impl TypeOptions {
                 self.is_node = true;
                 Ok(true)
             }
-            Some("from_lua_context") => {
-                if self.from_lua_context.is_some() {
+            Some("sync") => {
+                let Meta::Path(_) = &option else {
                     return Err(Error::new_spanned(
                         option,
-                        "multiple `from_lua_context` attributes",
+                        "expected `sync` without arguments or value",
                     ));
-                }
-
-                let Meta::List(list) = &option else {
-                    return Err(
-                        Error::new_spanned(option, "expected `from_lua_context(MyContext<'lua>)`")
-                    );
                 };
 
-                self.from_lua_context = Some(list.parse_args()?);
+                self.sync = true;
 
                 Ok(true)
             }
@@ -56,9 +50,10 @@ impl TypeOptions {
                 }
 
                 let Meta::NameValue(value) = &option else {
-                    return Err(
-                        Error::new_spanned(option, "expected `lua_metatable = \"MyMetatable\"`")
-                    );
+                    return Err(Error::new_spanned(
+                        option,
+                        "expected `lua_metatable = \"MyMetatable\"`",
+                    ));
                 };
 
                 self.lua_metatable = Some(value.value.clone());
@@ -74,9 +69,10 @@ impl TypeOptions {
                 }
 
                 let Meta::List(list) = &option else {
-                    return Err(
-                        Error::new_spanned(option, "expected `lua_base_type(MyType)`")
-                    );
+                    return Err(Error::new_spanned(
+                        option,
+                        "expected `lua_base_type(MyType)`",
+                    ));
                 };
 
                 self.lua_base_type = Some(list.parse_args()?);
@@ -145,16 +141,22 @@ impl EnumOptions {
                             return Err(Error::new_spanned(option, "multiple `tag` attributes"));
                         }
 
-                        let Meta::NameValue(MetaNameValue{value: Expr::Path(path), ..}) = &option else {
-                            return Err(
-                                Error::new_spanned(option, "expected `tag = property_name`")
-                            );
+                        let Meta::NameValue(MetaNameValue {
+                            value: Expr::Path(path),
+                            ..
+                        }) = &option
+                        else {
+                            return Err(Error::new_spanned(
+                                option,
+                                "expected `tag = property_name`",
+                            ));
                         };
 
                         let Some(ident) = path.path.get_ident() else {
-                            return Err(
-                                Error::new_spanned(option, "expected `tag = property_name`")
-                            );
+                            return Err(Error::new_spanned(
+                                option,
+                                "expected `tag = property_name`",
+                            ));
                         };
 
                         options.tag_name = Some(ident.to_string());
@@ -216,9 +218,10 @@ impl VariantOptions {
                         }
 
                         let Meta::List(list) = &option else {
-                            return Err(
-                                Error::new_spanned(option, "expected `lua_base_type(MyType)`")
-                            );
+                            return Err(Error::new_spanned(
+                                option,
+                                "expected `lua_base_type(MyType)`",
+                            ));
                         };
 
                         options.lua_base_type = Some(list.parse_args()?);
@@ -232,9 +235,10 @@ impl VariantOptions {
                         }
 
                         let Meta::NameValue(value) = &option else {
-                            return Err(
-                                Error::new_spanned(option, "expected `lua_method = \"my_method\"`")
-                            );
+                            return Err(Error::new_spanned(
+                                option,
+                                "expected `lua_method = \"my_method\"`",
+                            ));
                         };
 
                         options.lua_method = Some(value.value.clone());
@@ -251,7 +255,6 @@ impl VariantOptions {
 #[derive(Clone, Default)]
 pub(crate) struct FieldOptions {
     pub(crate) flatten: bool,
-    pub(crate) is_recursive: bool,
     pub(crate) parse_with: Option<Path>,
     pub(crate) is_optional: bool,
     pub(crate) lua_self: bool,
@@ -273,9 +276,6 @@ impl FieldOptions {
                     Some("flatten") => {
                         options.flatten = true;
                     }
-                    Some("recursive") => {
-                        options.is_recursive = true;
-                    }
                     Some("parse_with") => {
                         if options.parse_with.is_some() {
                             return Err(Error::new_spanned(
@@ -284,10 +284,15 @@ impl FieldOptions {
                             ));
                         }
 
-                        let Meta::NameValue(MetaNameValue{value: Expr::Path(path), ..}) = option else {
-                            return Err(
-                                Error::new_spanned(option, "expected `parse_with = path::to::function`")
-                            );
+                        let Meta::NameValue(MetaNameValue {
+                            value: Expr::Path(path),
+                            ..
+                        }) = option
+                        else {
+                            return Err(Error::new_spanned(
+                                option,
+                                "expected `parse_with = path::to::function`",
+                            ));
                         };
 
                         options.parse_with = Some(path.path);

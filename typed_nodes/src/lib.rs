@@ -213,14 +213,6 @@ where
     }
 }
 
-pub trait Context {
-    type NodeId: PartialEq + Eq + Hash + 'static;
-    type Bounds: Bounds;
-
-    fn get_nodes(&self) -> &Nodes<Self::NodeId, Self::Bounds>;
-    fn get_nodes_mut(&mut self) -> &mut Nodes<Self::NodeId, Self::Bounds>;
-}
-
 pub struct IterDyn<'a, B: Bounds> {
     inner: std::iter::FlatMap<
         std::collections::hash_map::Values<'a, TypeId, BoxedGroupOf<B>>,

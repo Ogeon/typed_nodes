@@ -99,18 +99,6 @@ impl Fields {
         Ok(result)
     }
 
-    pub(crate) fn fields(&self) -> FieldsIter {
-        match self {
-            Fields::Named { fields } => FieldsIter::Named {
-                iter: fields.iter(),
-            },
-            Fields::Unnamed { fields } => FieldsIter::Unnamed {
-                iter: fields.iter(),
-            },
-            Fields::Unit => FieldsIter::Unit,
-        }
-    }
-
     pub(crate) fn is_empty(&self) -> bool {
         match self {
             Fields::Named { fields } => fields.is_empty(),
@@ -124,28 +112,6 @@ impl Fields {
             Fields::Named { fields } => fields.len(),
             Fields::Unnamed { fields } => fields.len(),
             Fields::Unit => 0,
-        }
-    }
-}
-
-pub(crate) enum FieldsIter<'a> {
-    Named {
-        iter: std::slice::Iter<'a, (Ident, Field)>,
-    },
-    Unnamed {
-        iter: std::slice::Iter<'a, Field>,
-    },
-    Unit,
-}
-
-impl<'a> Iterator for FieldsIter<'a> {
-    type Item = &'a Field;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            FieldsIter::Named { iter } => iter.next().map(|(_, field)| field),
-            FieldsIter::Unnamed { iter } => iter.next(),
-            FieldsIter::Unit => None,
         }
     }
 }

@@ -1,4 +1,7 @@
-use std::fmt::Display;
+use std::{
+    fmt::Display,
+    sync::atomic::{AtomicI64, Ordering},
+};
 
 use mlua::Value;
 
@@ -6,30 +9,31 @@ pub use from_lua::*;
 pub use generate_lua::*;
 pub use visit_lua::*;
 
+use crate::{bounds::Bounds, Nodes};
+
 mod from_lua;
 mod generate_lua;
 mod visit_lua;
 
 const TABLE_ID_KEY: &str = "_node_table_id";
+pub static TABLE_ID_SOURCE: TableIdSource = TableIdSource::new();
 
-pub trait FromLuaContext<'lua>: crate::Context {
-    type Error: Error;
-    fn get_lua(&self) -> &'lua mlua::Lua;
-    fn table_id_to_node_id(&self, id: TableId) -> Self::NodeId;
-    fn next_table_id(&mut self) -> TableId;
+pub struct Context<'lua, B: Bounds> {
+    lua: &'lua mlua::Lua,
+    nodes: &'lua mut Nodes<TableId, B>,
+}
+
+impl<'lua, B: Bounds> Context<'lua, B> {
+    pub fn new(lua: &'lua mlua::Lua, nodes: &'lua mut Nodes<TableId, B>) -> Self {
+        Self { lua, nodes }
+    }
 }
 
 #[derive(Debug, Hash, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TableId(mlua::Integer);
 
 impl TableId {
-    pub fn get_or_assign<'lua, C>(
-        table: &mlua::Table<'lua>,
-        context: &mut C,
-    ) -> Result<Self, C::Error>
-    where
-        C: FromLuaContext<'lua>,
-    {
+    pub fn get_or_assign<'lua>(table: &mlua::Table<'lua>) -> mlua::Result<Self> {
         match table.raw_get(TABLE_ID_KEY)? {
             Value::Integer(id) => Ok(TableId(id)),
             current_id => {
@@ -39,7 +43,7 @@ impl TableId {
                     "the table ID should either be an integer or nil"
                 );
 
-                let id = context.next_table_id();
+                let id = TABLE_ID_SOURCE.next_table_id();
                 table.raw_set(TABLE_ID_KEY, Value::Integer(id.0))?;
                 Ok(id)
             }
@@ -47,24 +51,15 @@ impl TableId {
     }
 }
 
-pub struct TableIdSource(mlua::Integer);
+pub struct TableIdSource(AtomicI64);
 
 impl TableIdSource {
-    pub fn new() -> Self {
-        Self(0)
+    pub const fn new() -> Self {
+        Self(AtomicI64::new(0))
     }
 
-    pub fn next_table_id(&mut self) -> TableId {
-        let id = TableId(self.0);
-        self.0 = self.0.checked_add(1).expect("out of table IDs");
-
-        id
-    }
-}
-
-impl Default for TableIdSource {
-    fn default() -> Self {
-        Self::new()
+    pub fn next_table_id(&self) -> TableId {
+        TableId(self.0.fetch_add(1, Ordering::Relaxed))
     }
 }
 

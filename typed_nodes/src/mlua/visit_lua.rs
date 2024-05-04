@@ -1,18 +1,24 @@
 use mlua::{Table, Value};
 
-use super::{Error, FromLuaContext};
+use crate::bounds::Bounds;
 
-pub trait VisitLua<'lua, C: FromLuaContext<'lua>> {
+use super::{Context, Error};
+
+pub trait VisitLua<'lua, B: Bounds> {
     type Output;
 
     fn expected(&self) -> String;
 
-    fn visit_nil(&mut self, _context: &mut C) -> Result<Self::Output, C::Error> {
-        Err(C::Error::invalid_type(&Value::Nil, &self.expected()))
+    fn visit_nil(&mut self, _context: &mut Context<'lua, B>) -> mlua::Result<Self::Output> {
+        Err(Error::invalid_type(&Value::Nil, &self.expected()))
     }
 
-    fn visit_boolean(&mut self, value: bool, _context: &mut C) -> Result<Self::Output, C::Error> {
-        Err(C::Error::invalid_type(
+    fn visit_boolean(
+        &mut self,
+        value: bool,
+        _context: &mut Context<'lua, B>,
+    ) -> mlua::Result<Self::Output> {
+        Err(Error::invalid_type(
             &Value::Boolean(value),
             &self.expected(),
         ))
@@ -21,9 +27,9 @@ pub trait VisitLua<'lua, C: FromLuaContext<'lua>> {
     fn visit_light_user_data(
         &mut self,
         value: mlua::LightUserData,
-        _context: &mut C,
-    ) -> Result<Self::Output, C::Error> {
-        Err(C::Error::invalid_type(
+        _context: &mut Context<'lua, B>,
+    ) -> mlua::Result<Self::Output> {
+        Err(Error::invalid_type(
             &Value::LightUserData(value),
             &self.expected(),
         ))
@@ -32,9 +38,9 @@ pub trait VisitLua<'lua, C: FromLuaContext<'lua>> {
     fn visit_integer(
         &mut self,
         value: mlua::Integer,
-        _context: &mut C,
-    ) -> Result<Self::Output, C::Error> {
-        Err(C::Error::invalid_type(
+        _context: &mut Context<'lua, B>,
+    ) -> mlua::Result<Self::Output> {
+        Err(Error::invalid_type(
             &Value::Integer(value),
             &self.expected(),
         ))
@@ -43,42 +49,33 @@ pub trait VisitLua<'lua, C: FromLuaContext<'lua>> {
     fn visit_number(
         &mut self,
         value: mlua::Number,
-        _context: &mut C,
-    ) -> Result<Self::Output, C::Error> {
-        Err(C::Error::invalid_type(
-            &Value::Number(value),
-            &self.expected(),
-        ))
+        _context: &mut Context<'lua, B>,
+    ) -> mlua::Result<Self::Output> {
+        Err(Error::invalid_type(&Value::Number(value), &self.expected()))
     }
 
     fn visit_string(
         &mut self,
         value: mlua::String<'lua>,
-        _context: &mut C,
-    ) -> Result<Self::Output, C::Error> {
-        Err(C::Error::invalid_type(
-            &Value::String(value),
-            &self.expected(),
-        ))
+        _context: &mut Context<'lua, B>,
+    ) -> mlua::Result<Self::Output> {
+        Err(Error::invalid_type(&Value::String(value), &self.expected()))
     }
 
     fn visit_table(
         &mut self,
         value: mlua::Table<'lua>,
-        _context: &mut C,
-    ) -> Result<Self::Output, C::Error> {
-        Err(C::Error::invalid_type(
-            &Value::Table(value),
-            &self.expected(),
-        ))
+        _context: &mut Context<'lua, B>,
+    ) -> mlua::Result<Self::Output> {
+        Err(Error::invalid_type(&Value::Table(value), &self.expected()))
     }
 
     fn visit_function(
         &mut self,
         value: mlua::Function<'lua>,
-        _context: &mut C,
-    ) -> Result<Self::Output, C::Error> {
-        Err(C::Error::invalid_type(
+        _context: &mut Context<'lua, B>,
+    ) -> mlua::Result<Self::Output> {
+        Err(Error::invalid_type(
             &Value::Function(value),
             &self.expected(),
         ))
@@ -87,20 +84,17 @@ pub trait VisitLua<'lua, C: FromLuaContext<'lua>> {
     fn visit_thread(
         &mut self,
         value: mlua::Thread<'lua>,
-        _context: &mut C,
-    ) -> Result<Self::Output, C::Error> {
-        Err(C::Error::invalid_type(
-            &Value::Thread(value),
-            &self.expected(),
-        ))
+        _context: &mut Context<'lua, B>,
+    ) -> mlua::Result<Self::Output> {
+        Err(Error::invalid_type(&Value::Thread(value), &self.expected()))
     }
 
     fn visit_user_data(
         &mut self,
         value: mlua::AnyUserData<'lua>,
-        _context: &mut C,
-    ) -> Result<Self::Output, C::Error> {
-        Err(C::Error::invalid_type(
+        _context: &mut Context<'lua, B>,
+    ) -> mlua::Result<Self::Output> {
+        Err(Error::invalid_type(
             &Value::UserData(value),
             &self.expected(),
         ))
@@ -109,12 +103,9 @@ pub trait VisitLua<'lua, C: FromLuaContext<'lua>> {
     fn visit_error(
         &mut self,
         value: mlua::Error,
-        _context: &mut C,
-    ) -> Result<Self::Output, C::Error> {
-        Err(C::Error::invalid_type(
-            &Value::Error(value),
-            &self.expected(),
-        ))
+        _context: &mut Context<'lua, B>,
+    ) -> mlua::Result<Self::Output> {
+        Err(Error::invalid_type(&Value::Error(value), &self.expected()))
     }
 
     #[cfg(feature = "luau")]
@@ -123,9 +114,9 @@ pub trait VisitLua<'lua, C: FromLuaContext<'lua>> {
         x: f32,
         y: f32,
         z: f32,
-        _context: &mut C,
-    ) -> Result<Self::Output, C::Error> {
-        Err(C::Error::invalid_type(
+        _context: &mut Context<'lua, B>,
+    ) -> mlua::Result<Self::Output> {
+        Err(Error::invalid_type(
             &Value::Vector(x, y, z),
             &self.expected(),
         ))
@@ -134,8 +125,8 @@ pub trait VisitLua<'lua, C: FromLuaContext<'lua>> {
     fn visit_lua(
         &mut self,
         value: mlua::Value<'lua>,
-        context: &mut C,
-    ) -> Result<Self::Output, C::Error> {
+        context: &mut Context<'lua, B>,
+    ) -> mlua::Result<Self::Output> {
         match value {
             Value::Nil => self.visit_nil(context),
             Value::Boolean(value) => self.visit_boolean(value, context),
@@ -159,24 +150,24 @@ pub struct VisitTable<F>(F);
 
 impl<F> VisitTable<F> {
     #[inline(always)]
-    pub fn visit<'lua, T, C>(
+    pub fn visit<'lua, T, B>(
         value: mlua::Value<'lua>,
-        context: &mut C,
+        context: &mut Context<'lua, B>,
         visit: F,
-    ) -> Result<T, C::Error>
+    ) -> mlua::Result<T>
     where
-        C: FromLuaContext<'lua>,
-        F: FnMut(mlua::Table<'lua>, &mut C) -> Result<T, C::Error>,
+        F: FnMut(mlua::Table<'lua>, &mut Context<'lua, B>) -> mlua::Result<T>,
+        B: Bounds,
     {
         let mut visitor = Self(visit);
         visitor.visit_lua(value, context)
     }
 }
 
-impl<'lua, C, T, F> VisitLua<'lua, C> for VisitTable<F>
+impl<'lua, T, F, B> VisitLua<'lua, B> for VisitTable<F>
 where
-    C: FromLuaContext<'lua>,
-    F: FnMut(mlua::Table<'lua>, &mut C) -> Result<T, C::Error>,
+    F: FnMut(mlua::Table<'lua>, &mut Context<'lua, B>) -> mlua::Result<T>,
+    B: Bounds,
 {
     type Output = T;
 
@@ -186,7 +177,11 @@ where
     }
 
     #[inline(always)]
-    fn visit_table(&mut self, value: Table<'lua>, context: &mut C) -> Result<T, C::Error> {
+    fn visit_table(
+        &mut self,
+        value: Table<'lua>,
+        context: &mut Context<'lua, B>,
+    ) -> mlua::Result<T> {
         self.0(value, context)
     }
 }
@@ -196,24 +191,24 @@ pub struct VisitInteger<F>(F);
 
 impl<F> VisitInteger<F> {
     #[inline(always)]
-    pub fn visit<'lua, T, C>(
+    pub fn visit<'lua, T, B>(
         value: mlua::Value<'lua>,
-        context: &mut C,
+        context: &mut Context<'lua, B>,
         visit: F,
-    ) -> Result<T, C::Error>
+    ) -> mlua::Result<T>
     where
-        C: FromLuaContext<'lua>,
-        F: FnMut(mlua::Integer, &mut C) -> Result<T, C::Error>,
+        F: FnMut(mlua::Integer, &mut Context<'lua, B>) -> mlua::Result<T>,
+        B: Bounds,
     {
         let mut visitor = Self(visit);
         visitor.visit_lua(value, context)
     }
 }
 
-impl<'lua, C, T, F> VisitLua<'lua, C> for VisitInteger<F>
+impl<'lua, T, F, B> VisitLua<'lua, B> for VisitInteger<F>
 where
-    C: FromLuaContext<'lua>,
-    F: FnMut(mlua::Integer, &mut C) -> Result<T, C::Error>,
+    F: FnMut(mlua::Integer, &mut Context<'lua, B>) -> mlua::Result<T>,
+    B: Bounds,
 {
     type Output = T;
 
@@ -223,7 +218,11 @@ where
     }
 
     #[inline(always)]
-    fn visit_integer(&mut self, value: mlua::Integer, context: &mut C) -> Result<T, C::Error> {
+    fn visit_integer(
+        &mut self,
+        value: mlua::Integer,
+        context: &mut Context<'lua, B>,
+    ) -> mlua::Result<T> {
         self.0(value, context)
     }
 }
