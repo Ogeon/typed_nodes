@@ -226,3 +226,44 @@ where
         self.0(value, context)
     }
 }
+
+/// A helper visitor for strings.
+pub struct VisitString<F>(F);
+
+impl<F> VisitString<F> {
+    #[inline(always)]
+    pub fn visit<'lua, T, B>(
+        value: mlua::Value<'lua>,
+        context: &mut Context<'lua, B>,
+        visit: F,
+    ) -> mlua::Result<T>
+    where
+        F: FnMut(mlua::String, &mut Context<'lua, B>) -> mlua::Result<T>,
+        B: Bounds,
+    {
+        let mut visitor = Self(visit);
+        visitor.visit_lua(value, context)
+    }
+}
+
+impl<'lua, T, F, B> VisitLua<'lua, B> for VisitString<F>
+where
+    F: FnMut(mlua::String, &mut Context<'lua, B>) -> mlua::Result<T>,
+    B: Bounds,
+{
+    type Output = T;
+
+    #[inline(always)]
+    fn expected(&self) -> String {
+        format!("a string")
+    }
+
+    #[inline(always)]
+    fn visit_string(
+        &mut self,
+        value: mlua::String,
+        context: &mut Context<'lua, B>,
+    ) -> mlua::Result<T> {
+        self.0(value, context)
+    }
+}
