@@ -18,10 +18,31 @@ pub(crate) fn derive_for_struct(struct_data: StructData) -> TokenStream {
         name,
         generics,
         fields,
+        type_params,
     } = struct_data;
+
+    let bounds_type: Type = if struct_options.type_options.sync {
+        parse_quote!(typed_nodes::bounds::SendSyncBounds)
+    } else {
+        parse_quote!(typed_nodes::bounds::AnyBounds)
+    };
 
     let mut impl_generics = generics.clone();
     impl_generics.params.push(parse_quote!('lua));
+
+    {
+        let where_clause = impl_generics.make_where_clause();
+
+        if let Some(base) = &struct_options.type_options.lua_base_type {
+            where_clause.predicates.push(parse_quote!(#base: 'static));
+        }
+
+        for param in type_params {
+            where_clause.predicates.push(
+                parse_quote!(#param: typed_nodes::mlua::FromLua<'lua, #bounds_type> + 'static),
+            );
+        }
+    }
 
     let function_body = make_fields_parsing_code(
         Path::from(Ident::new("Self", Span::call_site())),
@@ -31,11 +52,6 @@ pub(crate) fn derive_for_struct(struct_data: StructData) -> TokenStream {
     );
     let where_clause = impl_generics.where_clause.take();
     let (_, generics, _) = generics.split_for_impl();
-    let bounds_type: Type = if struct_options.type_options.sync {
-        parse_quote!(typed_nodes::bounds::SendSyncBounds)
-    } else {
-        parse_quote!(typed_nodes::bounds::AnyBounds)
-    };
 
     quote! {
         impl #impl_generics typed_nodes::mlua::FromLua<'lua, #bounds_type> for #name #generics #where_clause {
@@ -56,10 +72,32 @@ pub(crate) fn derive_for_enum(enum_data: EnumData) -> TokenStream {
         name,
         generics,
         variants,
+        type_params,
     } = enum_data;
+    let bounds_type: Type = if enum_options.type_options.sync {
+        parse_quote!(typed_nodes::bounds::SendSyncBounds)
+    } else {
+        parse_quote!(typed_nodes::bounds::AnyBounds)
+    };
 
     let mut impl_generics = generics.clone();
     impl_generics.params.push(parse_quote!('lua));
+
+    {
+        let where_clause = impl_generics.make_where_clause();
+
+        if let Some(base) = &enum_options.type_options.lua_base_type {
+            where_clause.predicates.push(
+                parse_quote!(#base: typed_nodes::mlua::FromLua<'lua, #bounds_type> + 'static),
+            );
+        }
+
+        for param in type_params {
+            where_clause.predicates.push(
+                parse_quote!(#param: typed_nodes::mlua::FromLua<'lua, #bounds_type> + 'static),
+            );
+        }
+    }
 
     let mut variant_names_bytes = Vec::with_capacity(variants.len());
     let mut variant_names_str = Vec::with_capacity(variants.len());
@@ -135,11 +173,6 @@ pub(crate) fn derive_for_enum(enum_data: EnumData) -> TokenStream {
 
     let where_clause = impl_generics.where_clause.take();
     let (visitor_generics, generics, _) = generics.split_for_impl();
-    let bounds_type: Type = if enum_options.type_options.sync {
-        parse_quote!(typed_nodes::bounds::SendSyncBounds)
-    } else {
-        parse_quote!(typed_nodes::bounds::AnyBounds)
-    };
 
     let table_visitor = make_enum_table_visitor_fn(
         enum_options.tag_name.as_deref().unwrap_or(DEFAULT_TAG_NAME),

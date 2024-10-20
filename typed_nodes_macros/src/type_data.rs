@@ -1,5 +1,5 @@
 use proc_macro2::Ident;
-use syn::{Attribute, Generics, Type};
+use syn::{Attribute, Generics, Type, TypePath};
 
 use crate::attribute_options::{EnumOptions, FieldOptions, StructOptions, VariantOptions};
 
@@ -8,6 +8,7 @@ pub(crate) struct StructData {
     pub name: Ident,
     pub generics: Generics,
     pub fields: Fields,
+    pub type_params: Vec<Ident>,
 }
 
 impl StructData {
@@ -17,11 +18,16 @@ impl StructData {
         generics: Generics,
         struct_data: syn::DataStruct,
     ) -> syn::Result<Self> {
+        let options = StructOptions::from_attributes(&attributes)?;
+        let type_params =
+            get_type_parameters(&generics, options.type_options.lua_base_type.as_ref())?;
+
         Ok(Self {
-            options: StructOptions::from_attributes(&attributes)?,
+            options,
             name,
             generics,
             fields: Fields::new(struct_data.fields)?,
+            type_params,
         })
     }
 }
@@ -31,6 +37,7 @@ pub(crate) struct EnumData {
     pub name: Ident,
     pub generics: Generics,
     pub variants: Vec<Variant>,
+    pub type_params: Vec<Ident>,
 }
 
 impl EnumData {
@@ -40,15 +47,23 @@ impl EnumData {
         generics: Generics,
         enum_data: syn::DataEnum,
     ) -> syn::Result<Self> {
+        let options = EnumOptions::from_attributes(&attributes)?;
+
+        let variants = enum_data
+            .variants
+            .into_iter()
+            .map(|variant| Variant::new(variant))
+            .collect::<syn::Result<_>>()?;
+
+        let type_params =
+            get_type_parameters(&generics, options.type_options.lua_base_type.as_ref())?;
+
         Ok(Self {
-            options: EnumOptions::from_attributes(&attributes)?,
+            options,
             name,
             generics,
-            variants: enum_data
-                .variants
-                .into_iter()
-                .map(|variant| Variant::new(variant))
-                .collect::<syn::Result<_>>()?,
+            variants,
+            type_params,
         })
     }
 }
@@ -129,4 +144,42 @@ impl Field {
             ty,
         })
     }
+}
+
+fn get_type_parameters(generics: &Generics, base_type: Option<&Type>) -> syn::Result<Vec<Ident>> {
+    let type_parameters: Vec<_> = generics
+        .params
+        .iter()
+        .filter_map(|param| match param {
+            syn::GenericParam::Lifetime(_) => None,
+            syn::GenericParam::Type(type_param) => {
+                let Some(base_type) = base_type else {
+                    return Some(type_param.ident.clone());
+                };
+
+                let param_as_type = Type::Path(TypePath {
+                    qself: None,
+                    path: type_param.ident.clone().into(),
+                });
+
+                if &param_as_type == base_type {
+                    None
+                } else {
+                    Some(type_param.ident.clone())
+                }
+            }
+            syn::GenericParam::Const(_) => None,
+        })
+        .collect();
+
+    if let Some(base_type) = base_type {
+        if !type_parameters.is_empty() {
+            return Err(syn::Error::new_spanned(
+                base_type,
+                "`lua_base_type` is only supported on generic types if it's the only type parameter",
+            ));
+        }
+    }
+
+    Ok(type_parameters)
 }

@@ -1,7 +1,7 @@
 use convert_case::{Case, Casing};
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{quote, quote_spanned};
-use syn::{parse_quote_spanned, spanned::Spanned, Type};
+use syn::{parse_quote, parse_quote_spanned, spanned::Spanned, Type};
 
 use crate::{
     attribute_options::TypeOptions,
@@ -15,11 +15,26 @@ pub(crate) fn derive_for_struct(struct_data: StructData) -> TokenStream {
         name,
         mut generics,
         fields,
+        type_params,
     } = struct_data;
 
-    let metatable_name = metatable_name_expr(&options.type_options, &name);
+    let type_signature = type_signature_expr(&options.type_options, &name, &type_params);
     let base_type_delegate =
         base_type_delegate_expr(options.type_options.lua_base_type.as_ref(), &mut generics);
+
+    {
+        let where_clause = generics.make_where_clause();
+
+        if let Some(base) = &options.type_options.lua_base_type {
+            where_clause.predicates.push(parse_quote!(#base: 'static));
+        }
+
+        for param in type_params {
+            where_clause
+                .predicates
+                .push(parse_quote!(#param: typed_nodes::mlua::GenerateLua + 'static));
+        }
+    }
 
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
 
@@ -27,19 +42,19 @@ pub(crate) fn derive_for_struct(struct_data: StructData) -> TokenStream {
 
     quote! {
         impl #impl_generics typed_nodes::mlua::GenerateLua for #name #type_generics #where_clause {
-            fn metatable_name() -> &'static str {
-                #metatable_name
-            }
+            const TYPE_SIGNATURE: typed_nodes::mlua::TypeSignature = #type_signature;
 
             fn generate_lua(module: &mut typed_nodes::mlua::LuaModule) {
                 if !module.visit_type::<Self>() {
                     return;
                 }
 
+                let signature = &Self::TYPE_SIGNATURE;
+
                 #base_type_delegate;
 
                 let new_method = #new_method;
-                module.add_method(Self::metatable_name(), "new", new_method);
+                module.add_method(&Self::TYPE_SIGNATURE, "new", new_method);
             }
         }
     }
@@ -55,9 +70,10 @@ pub(crate) fn derive_for_enum(enum_data: EnumData) -> TokenStream {
         name,
         mut generics,
         variants,
+        type_params,
     } = enum_data;
 
-    let metatable_name = metatable_name_expr(&options.type_options, &name);
+    let type_signature = type_signature_expr(&options.type_options, &name, &type_params);
     let base_type_delegates: Vec<_> =
         base_type_delegate_expr(options.type_options.lua_base_type.as_ref(), &mut generics)
             .into_iter()
@@ -94,9 +110,9 @@ pub(crate) fn derive_for_enum(enum_data: EnumData) -> TokenStream {
             };
 
             let get_metatable = if let Some(base) = variant.options.lua_base_type {
-                quote_spanned!(base.span() => #base::metatable_name())
+                quote_spanned!(base.span() => &#base::TYPE_SIGNATURE)
             } else {
-                quote!(Self::metatable_name())
+                quote!(&Self::TYPE_SIGNATURE)
             };
 
             let method = method_expr(variant.fields, set_tag);
@@ -107,13 +123,25 @@ pub(crate) fn derive_for_enum(enum_data: EnumData) -> TokenStream {
             }
         });
 
+    {
+        let where_clause = generics.make_where_clause();
+
+        if let Some(base) = &options.type_options.lua_base_type {
+            where_clause.predicates.push(parse_quote!(#base: 'static));
+        }
+
+        for param in type_params {
+            where_clause
+                .predicates
+                .push(parse_quote!(#param: typed_nodes::mlua::GenerateLua + 'static));
+        }
+    }
+
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
 
     quote! {
         impl #impl_generics typed_nodes::mlua::GenerateLua for #name #type_generics #where_clause {
-            fn metatable_name() -> &'static str {
-                #metatable_name
-            }
+            const TYPE_SIGNATURE: typed_nodes::mlua::TypeSignature = #type_signature;
 
             fn generate_lua(module: &mut typed_nodes::mlua::LuaModule) {
                 if !module.visit_type::<Self>() {
@@ -178,7 +206,7 @@ fn method_expr(fields: Fields, set_tag: Option<TokenStream>) -> TokenStream {
                 method.add_statement(typed_nodes::mlua::LuaStatement::Return{
                     expression: typed_nodes::mlua::LuaExpression::SetMetatable {
                         variable: "__self",
-                        metatable: Self::metatable_name(),
+                        metatable: &Self::TYPE_SIGNATURE,
                     }
                 });
 
@@ -191,7 +219,7 @@ fn method_expr(fields: Fields, set_tag: Option<TokenStream>) -> TokenStream {
                 method.add_statement(typed_nodes::mlua::LuaStatement::Return{
                     expression: typed_nodes::mlua::LuaExpression::SetMetatable {
                         variable: "items",
-                        metatable: Self::metatable_name(),
+                        metatable: &Self::TYPE_SIGNATURE,
                     }
                 });
 
@@ -212,7 +240,7 @@ fn method_expr(fields: Fields, set_tag: Option<TokenStream>) -> TokenStream {
                 method.add_statement(typed_nodes::mlua::LuaStatement::Return{
                     expression: typed_nodes::mlua::LuaExpression::SetMetatable {
                         variable: "__self",
-                        metatable: Self::metatable_name(),
+                        metatable: &Self::TYPE_SIGNATURE,
                     }
                 });
 
@@ -222,20 +250,25 @@ fn method_expr(fields: Fields, set_tag: Option<TokenStream>) -> TokenStream {
     }
 }
 
-fn metatable_name_expr(options: &TypeOptions, name: &Ident) -> syn::Expr {
-    options
-        .lua_metatable
-        .clone()
-        .or_else(|| {
-            options
-                .lua_base_type
-                .as_ref()
-                .map(|base| parse_quote_spanned! {base.span() => #base::metatable_name()})
-        })
-        .unwrap_or_else(|| {
-            let name_str = name.to_string();
-            parse_quote_spanned! {name.span() => #name_str}
-        })
+fn type_signature_expr(options: &TypeOptions, name: &Ident, type_params: &[Ident]) -> TokenStream {
+    // lua_metatable overrides lua_base_type. The type name is the default.
+    let name = if let Some(metatable) = options.lua_metatable.clone() {
+        metatable
+    } else if let Some(base) = options.lua_base_type.as_ref() {
+        return quote_spanned! {base.span() => #base::TYPE_SIGNATURE};
+    } else {
+        let name_str = name.to_string();
+        parse_quote_spanned! {name.span() => #name_str}
+    };
+
+    let type_params = type_params
+        .iter()
+        .map(|param| quote_spanned! {param.span() => #param::TYPE_SIGNATURE});
+
+    quote!(typed_nodes::mlua::TypeSignature {
+        name: #name,
+        generics: &[#(&#type_params),*],
+    })
 }
 
 fn base_type_delegate_expr(
